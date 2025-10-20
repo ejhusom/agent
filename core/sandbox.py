@@ -28,7 +28,7 @@ class Sandbox:
         # Compression
         'gzip', 'gunzip', 'tar', 'zip', 'unzip',
         # Other utilities
-        'diff', 'comm', 'join', 'paste', 'tee', 'xargs',
+        'diff', 'comm', 'join', 'paste', 'tee', 'xargs', 'pwd',
     }
     
     def __init__(

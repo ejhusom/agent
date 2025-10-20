@@ -1,6 +1,6 @@
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"
 # provider = "ollama"
-# model = "gpt-oss"
+# model = "gemma3:270m"
 temperature = 0.0
 max_tokens = 16384

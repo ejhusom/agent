@@ -17,6 +17,7 @@ from registry.tool_registry import ToolRegistry
 from registry.agent_registry import AgentRegistry
 
 
+
 def main():
     """Run the supervisor agent."""
     
@@ -42,7 +43,7 @@ def main():
         instructions_dir="instructions"
     )
     
-    print(f"- [x] LLM client initialized (Anthropic)")
+    print(f"- [x] LLM client initialized (provider: {llm_client.provider}, model: {llm_client.model})")
     print(f"- [x] Tool registry initialized ({len(tool_registry.list_tools())} tools)")
     print(f"- [x] Agent registry initialized ({len(agent_registry.list_agents())} agents)")
     print(f"- [x] Supervisor ready")

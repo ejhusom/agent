@@ -25,10 +25,10 @@ class Config:
         self.config["temperature"] = self.config.get("temperature", 0.0)
         self.config["max_tokens"] = self.config.get("max_tokens", 8192)
         self.config["sandbox_timeout"] = self.config.get("sandbox_timeout", 60)
-        self.config["sandbox_workspace"] = self.config.get("sandbox_workspace", "./sandbox")
+        self.config["sandbox_workspace"] = self.config.get("sandbox_workspace", "./workspace")
         self.config["sandbox_allow_write"] = self.config.get("sandbox_allow_write", False)
-        self.config["agents_persist_dir"] = self.config.get("agents_persist_dir", "./persistent-agents")
-        self.config["tools_persist_dir"] = self.config.get("tools_persist_dir", "./persistent-tools")
+        self.config["agents_persist_dir"] = self.config.get("agents_persist_dir", "./workspace-agents")
+        self.config["tools_persist_dir"] = self.config.get("tools_persist_dir", "./workspace-tools")
 
         if "api_key" in self.config:
             self.config["api_key"] = self.config["api_key"]

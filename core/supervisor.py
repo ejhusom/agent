@@ -374,7 +374,7 @@ Be strategic and efficient."""
             tool = self.tool_registry.get(tool_name)
             if tool:
                 agent_tools[tool_name] = tool
-        
+
         # Create agent
         agent = Agent(
             name=name,
