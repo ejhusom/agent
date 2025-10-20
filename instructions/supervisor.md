@@ -45,7 +45,7 @@ def parse_openstack_log(log_line: str) -> dict:
 - Assign appropriate tools
 
 Example:
-```
+```python
 create_agent(
     name="log_analyzer",
     system_prompt="You analyze log files for errors and anomalies. Be thorough and cite line numbers.",
@@ -66,7 +66,9 @@ create_agent(
 - Handle errors gracefully
 - Return structured data (dicts/lists)
 
+
 **Test before committing:**
+When testing tool code with execute_code, assign the result to `result`:
 ```python
 # Always test first
 execute_code("""
