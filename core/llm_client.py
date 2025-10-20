@@ -28,7 +28,7 @@ class LLMClient:
         messages: List[Dict[str, str]],
         system: Optional[str] = None,
         tools: Optional[List[Dict]] = None,
-        max_tokens: int = 4096,
+        max_tokens: int = 16384,
         temperature: float = 0.0
     ) -> Dict[str, Any]:
         """
@@ -83,6 +83,10 @@ class LLMClient:
                         "name": tc.function.name,
                         "arguments": tc.function.arguments
                     })
+
+            finish_reason = choice.finish_reason if hasattr(choice, 'finish_reason') else None
+            role = message.role if hasattr(message, 'role') else None
+
         
         usage = {
             "input_tokens": 0,
@@ -97,9 +101,13 @@ class LLMClient:
                 "output_tokens": getattr(usage_obj, 'completion_tokens', 0),
                 "total_tokens": getattr(usage_obj, 'total_tokens', 0)
             }
-        
+
         return {
             "content": content,
             "tool_calls": tool_calls,
-            "usage": usage
+            "usage": usage,
+            "created": getattr(response, 'created', None),
+            "model": getattr(response, 'model', None),
+            "role": role,
+            "finish_reason": finish_reason
         }

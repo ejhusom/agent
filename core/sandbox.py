@@ -12,7 +12,7 @@ from typing import Dict, Any
 class Sandbox:
     """Execute Python code safely in subprocess."""
     
-    def __init__(self, timeout: int = 10, workspace: str = "/tmp/iexplain-workspace"):
+    def __init__(self, timeout: int = 100, workspace: str = "/tmp/iexplain-workspace"):
         """
         Args:
             timeout: Execution timeout in seconds
