@@ -81,9 +81,13 @@ class Workspace:
             agents_dir = str(base_dir / "agents")
             workspace_dir = str(base_dir / "workspace")
         
-        self.tools_dir = Path(tools_dir).expanduser().resolve()
-        self.agents_dir = Path(agents_dir or tools_dir).expanduser().resolve()
-        self.workspace_dir = Path(workspace_dir or tools_dir).expanduser().resolve()
+        self.tools_dir = Path(tools_dir).expanduser()
+        self.agents_dir = Path(agents_dir or tools_dir).expanduser()
+        self.workspace_dir = Path(workspace_dir or tools_dir).expanduser()
+        # TODO: Removed resolve() to prevent issues with tmp/ being resolved into private/tmp/ on macOS. Might consider fixing this later.
+        # self.tools_dir = Path(tools_dir).expanduser().resolve()
+        # self.agents_dir = Path(agents_dir or tools_dir).expanduser().resolve()
+        # self.workspace_dir = Path(workspace_dir or tools_dir).expanduser().resolve()
         
         # Create directories if they don't exist
         self._ensure_directories()

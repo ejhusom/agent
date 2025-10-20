@@ -65,7 +65,7 @@ def test_detect_git_repo(temp_dir):
     """Test that workspace detects git repository."""
     # Create fake git repo
     (temp_dir / ".git").mkdir()
-    
+
     with patch('pathlib.Path.cwd', return_value=temp_dir):
         workspace = Workspace()
         assert workspace.tools_dir == temp_dir / "iexplain" / "tools"
@@ -89,11 +89,11 @@ def test_xdg_data_home_respected(temp_dir):
         assert workspace.tools_dir == xdg_dir / "iexplain" / "tools"
 
 
-def test_custom_directories():
+def test_custom_directories(temp_dir):
     """Test that custom directories override auto-detection."""
-    custom_tools = "/custom/tools"
-    custom_agents = "/custom/agents"
-    
+    custom_tools = temp_dir / "custom/tools"
+    custom_agents = temp_dir / "custom/agents"
+
     workspace = Workspace(
         tools_dir=custom_tools,
         agents_dir=custom_agents
