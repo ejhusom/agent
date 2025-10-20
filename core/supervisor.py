@@ -404,7 +404,7 @@ Be strategic and efficient."""
         self,
         command: str,
         args: list,
-        input_data: str = none
+        input_data: str = None
     ) -> dict[str, any]:
         """Execute unix command."""
         result = self.sandbox.execute_command(

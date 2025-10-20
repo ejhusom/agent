@@ -82,6 +82,17 @@ class Agent:
                 "iteration": iteration,
                 "response": response
             })
+
+            # Print response for debugging. Print in a way that is easy to read. Include tool calls if any.
+            print(f"--- Iteration {iteration} ---")
+            print("Response Content:")
+            print(response["content"])
+            if response["tool_calls"]:
+                print("Tool Calls:")
+                for tc in response["tool_calls"]:
+                    print(json.dumps(tc, indent=2))
+            print("-----------------------\n")
+
             
             # No tool calls? Done
             if not response["tool_calls"]:
