@@ -170,6 +170,56 @@ Be strategic and efficient."""
                     }
                 }
             },
+            "run_command": {
+                "function": self._run_command,
+                "schema": {
+                    "type": "function",
+                    "function": {
+                        "name": "run_command",
+                        "description": "Execute a Unix command (grep, awk, sed, find, etc.). Safe and sandboxed.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "command": {
+                                    "type": "string",
+                                    "description": "Command name (e.g., 'grep', 'find', 'awk')"
+                                },
+                                "args": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "Command arguments as list"
+                                },
+                                "input_data": {
+                                    "type": "string",
+                                    "description": "Optional stdin data to pipe to command"
+                                }
+                            },
+                            "required": ["command", "args"]
+                        }
+                    }
+                }
+            },
+
+            "run_shell": {
+                "function": self._run_shell,
+                "schema": {
+                    "type": "function",
+                    "function": {
+                        "name": "run_shell",
+                        "description": "Execute a shell command line with pipes and redirects. Use for complex Unix pipelines.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "command_line": {
+                                    "type": "string",
+                                    "description": "Shell command with pipes (e.g., 'grep ERROR log.txt | wc -l')"
+                                }
+                            },
+                            "required": ["command_line"]
+                        }
+                    }
+                }
+            },
             "read_instructions": {
                 "function": self._read_instructions,
                 "schema": {
@@ -349,6 +399,39 @@ Be strategic and efficient."""
             "output": result["output"],
             "error": result["error"]
         }
+
+    def _run_command(
+        self,
+        command: str,
+        args: list,
+        input_data: str = none
+    ) -> dict[str, any]:
+        """Execute unix command."""
+        result = self.sandbox.execute_command(
+            command=command,
+            args=args,
+            input_data=input_data
+        )
+        
+        return {
+            "success": result["success"],
+            "output": result["output"],
+            "error": result["error"],
+            "returncode": result["returncode"]
+        }
+
+
+    def _run_shell(self, command_line: str) -> dict[str, any]:
+        """Execute shell command line."""
+        result = self.sandbox.execute_shell(command_line)
+        
+        return {
+            "success": result["success"],
+            "output": result["output"],
+            "error": result["error"],
+            "returncode": result["returncode"]
+        }
+
     
     def _read_instructions(self, filename: str) -> str:
         """Read instruction file."""

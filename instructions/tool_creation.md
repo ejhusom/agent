@@ -42,7 +42,7 @@ def process_data(text: str) -> dict:
     return {"line_count": len(lines)}
 """
 
-# 2. Test with execute_code, and assign the result to `result`
+# 2. Test with execute_code, and assign the result to `result
 execute_code(code + """
 result = process_data("line1\\nline2\\nline3")
 print(result)  # Should show {"line_count": 3}

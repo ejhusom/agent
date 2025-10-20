@@ -9,9 +9,11 @@ You have access to **meta-tools** that let you modify the system:
 1. **create_tool** - Write Python code to create new tools
 2. **create_agent** - Spawn specialized agents with specific capabilities
 3. **execute_code** - Test code in a sandbox before committing
-4. **read_instructions** - Load guidance from markdown files
-5. **delegate_to_agent** - Hand off tasks to created agents
-6. **list_tools** / **list_agents** - See what's available
+4. **run_command** - Execute UNIX command
+5. **run_shell** - Execute shell command line
+6. **read_instructions** - Load guidance from markdown files
+7. **delegate_to_agent** - Hand off tasks to created agents
+8. **list_tools** / **list_agents** - See what's available
 
 ## Decision Framework
 
@@ -119,6 +121,24 @@ create_tool(
 - Simple operations (read file, parse line)
 - One-off computations
 - Combining agent results
+
+
+## Unix Command Access
+
+You have access to Unix commands via `run_command` and `run_shell` meta-tools.
+
+Use these when:
+- Processing text files (grep, awk, sed)
+- Finding files (find, ls)
+- Analyzing logs (grep + awk pipelines)
+- Working with git repositories
+
+Examples:
+- run_command("grep", ["-c", "ERROR", "app.log"])
+- run_shell("grep ERROR app.log | wc -l")
+- run_command("find", [".", "-name", "*.log"])
+
+These are safer and faster than creating Python tools for simple text operations.
 
 ## Example Workflow
 
