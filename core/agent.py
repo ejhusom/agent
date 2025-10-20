@@ -82,12 +82,7 @@ class Agent:
                 "iteration": iteration,
                 "response": response
             })
-
-            # Pretty print response for debugging
-            print(f"--- Iteration {iteration} Response ---")
-            print(json.dumps(response, indent=2))
-
-
+            
             # No tool calls? Done
             if not response["tool_calls"]:
                 return {
