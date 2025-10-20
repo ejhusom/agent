@@ -10,6 +10,7 @@ import shlex
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
+from .config import config
 
 class Sandbox:
     """Execute Python code and Unix commands safely in subprocess."""
@@ -32,9 +33,9 @@ class Sandbox:
     
     def __init__(
         self,
-        timeout: int = 10,
-        workspace: str = "/tmp/iexplain-workspace",
-        allow_write: bool = False
+        timeout: int = None,
+        workspace: str = None,
+        allow_write: bool = None,
     ):
         """
         Args:
@@ -42,10 +43,10 @@ class Sandbox:
             workspace: Directory for code execution
             allow_write: Whether to allow file writing in workspace
         """
-        self.timeout = timeout
-        self.workspace = Path(workspace)
+        self.timeout = timeout if timeout else config.get("sandbox_timeout")
+        self.workspace = Path(workspace) if workspace else Path(config.get("sandbox_workspace"))
         self.workspace.mkdir(exist_ok=True)
-        self.allow_write = allow_write
+        self.allow_write = allow_write if allow_write else config.get("sandbox_allow_write")
     
     def execute(self, code: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
         """

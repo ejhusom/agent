@@ -6,6 +6,8 @@ Just wraps LLM with tool execution - no complex workflows.
 from typing import List, Dict, Any, Optional
 import json
 
+from .config import config
+from .sandbox import Sandbox
 
 class Agent:
     """Simple agent: LLM + tools."""
@@ -15,7 +17,13 @@ class Agent:
         name: str,
         system_prompt: str,
         llm_client: Any,
-        tools: Dict[str, Dict[str, Any]] = None
+        provider: str = None,
+        model: str = None,
+        tools: Dict[str, Dict[str, Any]] = None,
+        temperature: float = None,
+        max_tokens: int = None,
+        logging_enabled: bool = True,
+        sandbox: Optional[Sandbox] = None,
     ):
         """
         Args:
@@ -29,12 +37,22 @@ class Agent:
         self.llm_client = llm_client
         self.tools = tools or {}
         self.history = []
+        self.provider = provider if provider is not None else config.get("provider", None)
+        self.model = model if model is not None else config.get("model", None)
+        self.temperature = temperature if temperature is not None else config.get("temperature", 0.0)
+        self.max_tokens = max_tokens if max_tokens is not None else config.get("max_tokens", 8192)
+
+        self.sandbox = sandbox or Sandbox(
+            timeout=config.get("sandbox_timeout"),
+            workspace=config.get("sandbox_workspace"),
+            allow_write=config.get("sandbox_allow_write")
+        )
     
     def run(
         self,
         message: str,
         context: Dict[str, Any] = None,
-        max_iterations: int = 20
+        max_iterations: int = 20,
     ) -> Dict[str, Any]:
         """
         Execute agent on a message.
@@ -70,12 +88,11 @@ class Agent:
             
             # Call LLM
             response = self.llm_client.complete(
-                model="claude-sonnet-4-20250514",  # Default, can be parameterized
                 messages=messages,
                 system=self.system_prompt,
                 tools=tool_schemas,
-                max_tokens=16384,
-                temperature=0.0
+                max_tokens=self.max_tokens,
+                temperature=self.temperature
             )
             
             self.history.append({
@@ -84,7 +101,7 @@ class Agent:
             })
 
             # Print response for debugging. Print in a way that is easy to read. Include tool calls if any.
-            print(f"--- Iteration {iteration} ---")
+            print(f"=== Iteration {iteration}  of agent {self.name} ===")
             print("Response Content:")
             print(response["content"])
             if response["tool_calls"]:
@@ -126,7 +143,21 @@ class Agent:
                     "name": tool_name,
                     "content": result_content
                 })
-        
+
+                # Print tool execution result for debugging
+                print(f"Tool '{tool_name}' executed. Result:")
+                print(result_content)
+                print("-----------------------\n")
+
+            # DEBUG: Check for delegation
+            if self.name == "supervisor" and "delegate_to_agent" in [tc["name"] for tc in response["tool_calls"]]:
+                # If supervisor delegated to another agent, break the loop
+                print("Supervisor delegated to another agent.")
+
+            # # DEBUG: Check for whether another agent took over
+            # if self.name != "supervisor":
+            #     breakpoint()
+
         # Max iterations reached
         return {
             "content": "Max iterations reached",
@@ -157,3 +188,11 @@ class Agent:
                             else json.dumps(tc["arguments"])
             }
         } for tc in tool_calls]
+
+    def _execute_sandboxed_code(self, code: str) -> str:
+        """Execute code in sandbox and return output."""
+        if not self.sandbox:
+            raise RuntimeError("Sandbox not configured for this agent")
+        
+        output = self.sandbox.execute(code)
+        return output

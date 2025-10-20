@@ -5,11 +5,11 @@ Supervisor: Main orchestration loop with meta-tools.
 from typing import Dict, Any
 from pathlib import Path
 from .agent import Agent
+from .config import config
 from .llm_client import LLMClient
 from .sandbox import Sandbox
 from registry.tool_registry import ToolRegistry
 from registry.agent_registry import AgentRegistry
-
 
 class Supervisor:
     """
@@ -35,7 +35,11 @@ class Supervisor:
         self.llm_client = llm_client
         self.tool_registry = tool_registry
         self.agent_registry = agent_registry
-        self.sandbox = Sandbox()
+        self.sandbox = Sandbox(
+            timeout=config.get("sandbox_timeout"),
+            workspace=config.get("sandbox_workspace"),
+            allow_write=config.get("sandbox_allow_write")
+        )
         self.instructions_dir = Path(instructions_dir)
         
         # Create supervisor agent with meta-tools
@@ -43,7 +47,7 @@ class Supervisor:
             name="supervisor",
             system_prompt=self._load_system_prompt(),
             llm_client=llm_client,
-            tools=self._get_meta_tools()
+            tools=self._get_meta_tools(),
         )
     
     def run(self, message: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -407,31 +411,15 @@ Be strategic and efficient."""
         input_data: str = None
     ) -> dict[str, any]:
         """Execute unix command."""
-        result = self.sandbox.execute_command(
+        return self.sandbox.execute_command(
             command=command,
             args=args,
             input_data=input_data
         )
-        
-        return {
-            "success": result["success"],
-            "output": result["output"],
-            "error": result["error"],
-            "returncode": result["returncode"]
-        }
-
 
     def _run_shell(self, command_line: str) -> dict[str, any]:
         """Execute shell command line."""
-        result = self.sandbox.execute_shell(command_line)
-        
-        return {
-            "success": result["success"],
-            "output": result["output"],
-            "error": result["error"],
-            "returncode": result["returncode"]
-        }
-
+        return self.sandbox.execute_shell(command_line)
     
     def _read_instructions(self, filename: str) -> str:
         """Read instruction file."""

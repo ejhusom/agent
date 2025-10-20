@@ -1,30 +1,40 @@
 """
 Simplified LLM client using LiteLLM.
 """
-
+import os
 from typing import List, Dict, Optional, Any
-import litellm
+# import time
+# start = time.time()
+# from litellm import completion
+# end = time.time()
+# print(f"Imported litellm in {end - start:.2f} seconds")
 
+from .llm_api import completion
 
 class LLMClient:
     """Unified LLM interface."""
     
-    def __init__(self, provider: str = "anthropic", api_key: Optional[str] = None):
-        """
-        Args:
-            provider: 'anthropic', 'openai', or 'ollama'
-            api_key: API key (not needed for Ollama)
-        """
+    def __init__(self, 
+                 provider: str,
+                 model: str,
+                 api_key: Optional[str] = None,
+    ):
+        """Initialize LLM client."""
         self.provider = provider
-        
-        if provider == "anthropic" and api_key:
-            litellm.api_key = api_key
-        elif provider == "openai" and api_key:
-            litellm.openai_key = api_key
-    
+        self.api_key = api_key
+        self.model = model
+
+        if self.provider in ["anthropic", "openai"] and not self.api_key:
+            raise ValueError(f"API key required for provider: {self.provider}")
+
+        if self.provider == "anthropic" and self.api_key:
+            os.environ["ANTHROPIC_KEY"] = self.api_key
+        elif self.provider == "openai" and self.api_key:
+            os.environ["OPENAI_KEY"] = self.api_key
+
+
     def complete(
         self,
-        model: str,
         messages: List[Dict[str, str]],
         system: Optional[str] = None,
         tools: Optional[List[Dict]] = None,
@@ -41,8 +51,10 @@ class LLMClient:
                 "usage": Dict
             }
         """
+
         kwargs = {
-            "model": model,
+            "provider": self.provider,
+            "model": self.model,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature
@@ -58,7 +70,7 @@ class LLMClient:
             kwargs["tool_choice"] = "auto"
         
         try:
-            response = litellm.completion(**kwargs)
+            response = completion(**kwargs)
             return self._parse_response(response)
         
         except Exception as e:

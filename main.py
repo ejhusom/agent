@@ -1,9 +1,8 @@
 """
-iExplain v2: Self-Modifying Agentic System
+iExplain: Self-Modifying Agentic System
 
 Entry point for the supervisor-driven architecture.
 """
-
 import os
 import sys
 from pathlib import Path
@@ -11,6 +10,7 @@ from pathlib import Path
 # Add core to path
 sys.path.insert(0, str(Path(__file__).parent))
 
+from core.config import config
 from core.llm_client import LLMClient
 from core.supervisor import Supervisor
 from registry.tool_registry import ToolRegistry
@@ -20,23 +20,20 @@ from registry.agent_registry import AgentRegistry
 def main():
     """Run the supervisor agent."""
     
-    # Get API key from environment
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        print("Error: ANTHROPIC_API_KEY not set")
-        print("Set it with: export ANTHROPIC_API_KEY=your_key")
-        sys.exit(1)
-    
     print("=" * 70)
-    print("iExplain v2: Self-Modifying Agentic System")
+    print("iExplain: Self-Modifying Agentic System")
     print("=" * 70)
     print()
     
     # Initialize components
     print("Initializing system...")
-    llm_client = LLMClient(provider="anthropic", api_key=api_key)
-    tool_registry = ToolRegistry()
-    agent_registry = AgentRegistry()
+    llm_client = LLMClient(
+        provider=config.get("provider", None),
+        api_key=config.get("api_key", None),
+        model=config.get("model", None)
+    )
+    tool_registry = ToolRegistry(persist_dir=config.get("tools_persist_dir"))
+    agent_registry = AgentRegistry(persist_dir=config.get("agents_persist_dir"))
     
     supervisor = Supervisor(
         llm_client=llm_client,
@@ -45,10 +42,10 @@ def main():
         instructions_dir="instructions"
     )
     
-    print(f"✓ LLM client initialized (Anthropic)")
-    print(f"✓ Tool registry initialized ({len(tool_registry.list_tools())} tools)")
-    print(f"✓ Agent registry initialized ({len(agent_registry.list_agents())} agents)")
-    print(f"✓ Supervisor ready")
+    print(f"- [x] LLM client initialized (Anthropic)")
+    print(f"- [x] Tool registry initialized ({len(tool_registry.list_tools())} tools)")
+    print(f"- [x] Agent registry initialized ({len(agent_registry.list_agents())} agents)")
+    print(f"- [x] Supervisor ready")
     print()
     
     # Interactive mode
@@ -73,8 +70,8 @@ def main():
     
     else:
         # Interactive REPL
-        print("Interactive mode. Type 'exit' to quit.")
-        print("Type 'help' for available commands.")
+        print("Interactive mode. Type '/exit' to quit.")
+        print("Type '/help' for available commands.")
         print()
         
         while True:
@@ -84,19 +81,19 @@ def main():
                 if not user_input:
                     continue
                 
-                if user_input.lower() in ['exit', 'quit']:
+                if user_input.lower() in ['/exit', '/quit', '/bye']:
                     print("Goodbye!")
                     break
                 
-                if user_input.lower() == 'help':
+                if user_input.lower() == '/help':
                     print_help()
                     continue
                 
-                if user_input.lower() == 'tools':
+                if user_input.lower() == '/tools':
                     print(f"Available tools: {tool_registry.list_tools()}")
                     continue
                 
-                if user_input.lower() == 'agents':
+                if user_input.lower() == '/agents':
                     print(f"Created agents: {agent_registry.list_agents()}")
                     continue
                 
@@ -110,7 +107,7 @@ def main():
                 print()
             
             except KeyboardInterrupt:
-                print("\n\nInterrupted. Type 'exit' to quit.")
+                print("\n\nInterrupted. Type '/exit' to quit.")
             
             except Exception as e:
                 print(f"\nError: {e}")
@@ -123,10 +120,10 @@ def print_help():
     print("""
 Commands:
   <task>     Execute a task with the supervisor
-  tools      List available tools
-  agents     List created agents
-  help       Show this help
-  exit       Quit
+  /tools      List available tools
+  /agents     List created agents
+  /help       Show this help
+  /exit       Quit
 
 Examples:
   >>> Create a tool to parse OpenStack logs

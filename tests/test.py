@@ -58,7 +58,7 @@ def test_registries():
 def test_llm_client():
     """Test LLM client initialization."""
     api_key = os.getenv("ANTHROPIC_API_KEY")
-    client = LLMClient(provider="anthropic", api_key=api_key)
+    client = LLMClient()
 
 if __name__ == "__main__":
     pytest.main([__file__])
