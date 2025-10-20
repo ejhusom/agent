@@ -1,479 +1,583 @@
 """
-Supervisor: Main orchestration loop with meta-tools.
+Supervisor with integrated Config, Workspace, and Logger support.
+
+The Supervisor is a meta-agent that can:
+1. Create tools dynamically
+2. Create specialized agents
+3. Delegate tasks to agents
+4. Coordinate multi-agent workflows
+
+All actions are logged and persisted to the workspace.
 """
 
-from typing import Dict, Any
+import time
+from typing import List, Dict, Any, Optional, Callable
 from pathlib import Path
+
+from .config import Config
+from .workspace import Workspace
+from .logger import ConversationLogger
 from .agent import Agent
-from .llm_client import LLMClient
-from .sandbox import Sandbox
-from registry.tool_registry import ToolRegistry
-from registry.agent_registry import AgentRegistry
+
+
+class SupervisorError(Exception):
+    """Supervisor-related errors."""
+    pass
 
 
 class Supervisor:
     """
-    Supervisor agent with meta-tools for self-modification.
+    Meta-agent that creates tools and agents dynamically.
     
-    Can create tools, create agents, execute code, and delegate tasks.
+    Features:
+    - Creates tools from LLM-generated code
+    - Creates specialized agents with tools
+    - Delegates tasks to agents
+    - All actions logged and persisted
+    - Config-driven behavior
     """
     
     def __init__(
         self,
-        llm_client: LLMClient,
-        tool_registry: ToolRegistry,
-        agent_registry: AgentRegistry,
-        instructions_dir: str = "instructions"
+        llm_client: Any,
+        config: Config,
+        workspace: Workspace,
+        logger: Optional[ConversationLogger] = None
     ):
         """
+        Initialize supervisor.
+        
         Args:
-            llm_client: LLM client for API calls
-            tool_registry: Dynamic tool registry
-            agent_registry: Dynamic agent registry
-            instructions_dir: Directory with markdown instructions
+            llm_client: LLM client for completions
+            config: Configuration object
+            workspace: Workspace for persistence
+            logger: Optional conversation logger
         """
         self.llm_client = llm_client
-        self.tool_registry = tool_registry
-        self.agent_registry = agent_registry
-        self.sandbox = Sandbox()
-        self.instructions_dir = Path(instructions_dir)
+        self.config = config
+        self.workspace = workspace
+        self.logger = logger
         
-        # Create supervisor agent with meta-tools
-        self.agent = Agent(
-            name="supervisor",
-            system_prompt=self._load_system_prompt(),
-            llm_client=llm_client,
-            tools=self._get_meta_tools()
-        )
+        self.name = "supervisor"
+        
+        # Track created tools and agents
+        self.tools: Dict[str, Callable] = {}
+        self.agents: Dict[str, Agent] = {}
+        
+        # Load existing tools and agents from workspace
+        self._load_from_workspace()
     
-    def run(self, message: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+    def _load_from_workspace(self) -> None:
+        """Load existing tools and agents from workspace."""
+        # Load tools
+        for tool_file in self.workspace.tools_dir.glob("*.py"):
+            try:
+                tool_name = tool_file.stem
+                tool_data = self.workspace.load_tool(tool_name)
+                
+                # Execute tool code to get function
+                namespace = {}
+                exec(tool_data["code"], namespace)
+                
+                if tool_name in namespace:
+                    tool_func = namespace[tool_name]
+                    tool_func.__tool_schema__ = tool_data["schema"]
+                    self.tools[tool_name] = tool_func
+            
+            except Exception as e:
+                if self.logger:
+                    self.logger.log_error(
+                        agent=self.name,
+                        error_type=type(e).__name__,
+                        error_message=f"Failed to load tool {tool_name}: {e}"
+                    )
+        
+        # Note: Agents are not loaded at init, created on-demand
+    
+    def run(self, user_query: str) -> Dict[str, Any]:
         """
-        Execute supervisor on a task.
+        Run supervisor on a user query.
+        
+        The supervisor will:
+        1. Analyze the query
+        2. Create necessary tools
+        3. Create specialized agent(s)
+        4. Delegate to agent(s)
+        5. Return result
+        
+        Args:
+            user_query: User's query/task
         
         Returns:
-            Agent response dict
+            Dict with success, result, and metadata
         """
-        return self.agent.run(message, context)
-    
-    def _load_system_prompt(self) -> str:
-        """Load supervisor system prompt from instructions."""
-        prompt_file = self.instructions_dir / "supervisor.md"
+        if self.logger:
+            self.logger.log_event(
+                event_type="supervisor_start",
+                agent=self.name,
+                data={"query": user_query}
+            )
         
-        if prompt_file.exists():
-            with open(prompt_file, 'r') as f:
-                return f.read()
+        iterations = 0
+        max_iterations = self.config.agent.max_iterations
         
-        # Fallback if file doesn't exist
-        return """You are a supervisor agent that orchestrates complex tasks.
-
-You can:
-- Create new tools by writing Python code
-- Create specialized agents for subtasks
-- Execute code to test tools
-- Read instruction files for guidance
-- Delegate tasks to created agents
-
-Think step by step:
-1. Understand the task
-2. Identify what capabilities are needed
-3. Create tools/agents as needed
-4. Execute the task
-5. Return results
-
-Be strategic and efficient."""
+        # Supervisor's system prompt
+        system_prompt = self._build_system_prompt()
+        
+        # Initialize conversation
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_query}
+        ]
+        
+        try:
+            while iterations < max_iterations:
+                iterations += 1
+                
+                # Get supervisor's next action
+                response = self._call_llm_with_retry(messages)
+                
+                if not response:
+                    error_msg = "Supervisor LLM call failed"
+                    if self.logger:
+                        self.logger.log_error(
+                            agent=self.name,
+                            error_type="LLMError",
+                            error_message=error_msg
+                        )
+                    return {
+                        "success": False,
+                        "error": error_msg,
+                        "iterations": iterations
+                    }
+                
+                messages.append(response)
+                
+                # Check if supervisor wants to use tools
+                tool_calls = response.get("tool_calls", [])
+                
+                if not tool_calls:
+                    # Supervisor is done
+                    result = response.get("content", "")
+                    
+                    if self.logger:
+                        self.logger.log_event(
+                            event_type="supervisor_completed",
+                            agent=self.name,
+                            data={
+                                "result": result,
+                                "iterations": iterations,
+                                "tools_created": len(self.tools),
+                                "agents_created": len(self.agents)
+                            }
+                        )
+                    
+                    return {
+                        "success": True,
+                        "result": result,
+                        "iterations": iterations,
+                        "tools_created": list(self.tools.keys()),
+                        "agents_created": list(self.agents.keys())
+                    }
+                
+                # Execute supervisor's tool calls
+                tool_results = []
+                for tool_call in tool_calls:
+                    result = self._execute_supervisor_tool(tool_call)
+                    tool_results.append(result)
+                
+                # Add results to conversation
+                for i, tool_call in enumerate(tool_calls):
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": str(tool_results[i].get("result", tool_results[i].get("error", "")))
+                    })
+            
+            # Max iterations reached
+            error_msg = f"Supervisor max iterations ({max_iterations}) reached"
+            
+            if self.logger:
+                self.logger.log_error(
+                    agent=self.name,
+                    error_type="MaxIterationsError",
+                    error_message=error_msg
+                )
+            
+            return {
+                "success": False,
+                "error": error_msg,
+                "iterations": iterations
+            }
+        
+        except Exception as e:
+            if self.logger:
+                self.logger.log_error(
+                    agent=self.name,
+                    error_type=type(e).__name__,
+                    error_message=str(e)
+                )
+            
+            return {
+                "success": False,
+                "error": str(e),
+                "iterations": iterations
+            }
     
-    def _get_meta_tools(self) -> Dict[str, Dict[str, Any]]:
-        """Get meta-tools for supervisor."""
-        return {
-            "create_tool": {
-                "function": self._create_tool,
-                "schema": {
-                    "type": "function",
-                    "function": {
-                        "name": "create_tool",
-                        "description": "Create a new tool by providing Python code. The tool will be tested and registered if valid.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "name": {
-                                    "type": "string",
-                                    "description": "Tool name (lowercase, underscores)"
-                                },
-                                "code": {
-                                    "type": "string",
-                                    "description": "Python function code. Must be a complete function definition."
-                                },
-                                "description": {
-                                    "type": "string",
-                                    "description": "What the tool does"
-                                },
-                                "parameters_schema": {
-                                    "type": "object",
-                                    "description": "JSON schema for function parameters"
-                                }
-                            },
-                            "required": ["name", "code", "description", "parameters_schema"]
-                        }
-                    }
-                }
-            },
-            "create_agent": {
-                "function": self._create_agent,
-                "schema": {
-                    "type": "function",
-                    "function": {
-                        "name": "create_agent",
-                        "description": "Create a specialized agent with specific tools and instructions.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "name": {
-                                    "type": "string",
-                                    "description": "Agent name"
-                                },
-                                "system_prompt": {
-                                    "type": "string",
-                                    "description": "Agent's system instructions"
-                                },
-                                "tools": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                    "description": "List of tool names this agent can use"
-                                }
-                            },
-                            "required": ["name", "system_prompt", "tools"]
-                        }
-                    }
-                }
-            },
-            "execute_code": {
-                "function": self._execute_code,
-                "schema": {
-                    "type": "function",
-                    "function": {
-                        "name": "execute_code",
-                        "description": "Execute Python code in a safe sandbox. Use this to test code before creating tools.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "code": {
-                                    "type": "string",
-                                    "description": "Python code to execute"
-                                },
-                                "test_inputs": {
-                                    "type": "object",
-                                    "description": "Test inputs as key-value pairs"
-                                }
-                            },
-                            "required": ["code"]
-                        }
-                    }
-                }
-            },
-            "run_command": {
-                "function": self._run_command,
-                "schema": {
-                    "type": "function",
-                    "function": {
-                        "name": "run_command",
-                        "description": "Execute a Unix command (grep, awk, sed, find, etc.). Safe and sandboxed.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "command": {
-                                    "type": "string",
-                                    "description": "Command name (e.g., 'grep', 'find', 'awk')"
-                                },
-                                "args": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                    "description": "Command arguments as list"
-                                },
-                                "input_data": {
-                                    "type": "string",
-                                    "description": "Optional stdin data to pipe to command"
-                                }
-                            },
-                            "required": ["command", "args"]
-                        }
-                    }
-                }
-            },
+    def _build_system_prompt(self) -> str:
+        """Build supervisor's system prompt."""
+        return """You are a supervisor agent that creates tools and specialized agents to solve tasks.
 
-            "run_shell": {
-                "function": self._run_shell,
-                "schema": {
-                    "type": "function",
-                    "function": {
-                        "name": "run_shell",
-                        "description": "Execute a shell command line with pipes and redirects. Use for complex Unix pipelines.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "command_line": {
-                                    "type": "string",
-                                    "description": "Shell command with pipes (e.g., 'grep ERROR log.txt | wc -l')"
-                                }
+Your capabilities:
+1. create_tool - Create a Python function tool
+2. create_agent - Create a specialized agent with tools
+3. delegate_to_agent - Delegate a task to an agent
+
+Workflow:
+1. Analyze the user's task
+2. Create any needed tools (parse_log, filter_errors, etc.)
+3. Create a specialized agent with those tools
+4. Delegate the task to the agent
+5. Return the agent's result to the user
+
+Available tools:
+- create_tool(name, description, code, parameters)
+- create_agent(name, description, tool_names)
+- delegate_to_agent(agent_name, task)
+
+Example:
+User: "Analyze error.log"
+You: 
+1. create_tool("parse_log", ...) 
+2. create_agent("log_analyzer", tools=["parse_log"])
+3. delegate_to_agent("log_analyzer", "Analyze error.log")
+4. Return agent's result
+"""
+    
+    def _call_llm_with_retry(
+        self,
+        messages: List[Dict[str, Any]],
+        max_retries: int = 3
+    ) -> Optional[Dict[str, Any]]:
+        """Call LLM with retry logic."""
+        # Get supervisor tools
+        supervisor_tools = self._get_supervisor_tool_schemas()
+        
+        for attempt in range(max_retries):
+            start_time = time.time()
+            
+            try:
+                response = self.llm_client.complete(
+                    model=self.config.llm.model,
+                    messages=messages,
+                    tools=supervisor_tools,
+                    temperature=self.config.llm.temperature,
+                    max_tokens=self.config.llm.max_tokens
+                )
+                
+                duration_ms = (time.time() - start_time) * 1000
+                
+                if self.logger:
+                    self.logger.log_llm_call(
+                        agent=self.name,
+                        model=self.config.llm.model,
+                        messages=messages,
+                        response=response,
+                        duration_ms=duration_ms,
+                        include_messages=self.config.logging.include_messages
+                    )
+                
+                return response
+            
+            except Exception as e:
+                if self.logger:
+                    self.logger.log_error(
+                        agent=self.name,
+                        error_type=type(e).__name__,
+                        error_message=f"LLM call failed (attempt {attempt + 1}/{max_retries}): {e}"
+                    )
+                
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+        
+        return None
+    
+    def _get_supervisor_tool_schemas(self) -> List[Dict[str, Any]]:
+        """Get tool schemas for supervisor's meta-tools."""
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "create_tool",
+                    "description": "Create a new Python function tool",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Tool name (valid Python identifier)"
                             },
-                            "required": ["command_line"]
-                        }
-                    }
-                }
-            },
-            "read_instructions": {
-                "function": self._read_instructions,
-                "schema": {
-                    "type": "function",
-                    "function": {
-                        "name": "read_instructions",
-                        "description": "Read a markdown instruction file for guidance.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "filename": {
-                                    "type": "string",
-                                    "description": "Filename (e.g., 'tool_creation.md')"
-                                }
+                            "description": {
+                                "type": "string",
+                                "description": "Tool description"
                             },
-                            "required": ["filename"]
-                        }
-                    }
-                }
-            },
-            "delegate_to_agent": {
-                "function": self._delegate_to_agent,
-                "schema": {
-                    "type": "function",
-                    "function": {
-                        "name": "delegate_to_agent",
-                        "description": "Delegate a task to a created agent.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "agent_name": {
-                                    "type": "string",
-                                    "description": "Name of the agent to delegate to"
-                                },
-                                "task": {
-                                    "type": "string",
-                                    "description": "Task description for the agent"
-                                },
-                                "context": {
-                                    "type": "object",
-                                    "description": "Optional context to provide"
-                                }
+                            "code": {
+                                "type": "string",
+                                "description": "Python function code"
                             },
-                            "required": ["agent_name", "task"]
-                        }
+                            "parameters": {
+                                "type": "object",
+                                "description": "JSON schema for function parameters"
+                            }
+                        },
+                        "required": ["name", "description", "code", "parameters"]
                     }
                 }
             },
-            "list_tools": {
-                "function": self._list_tools,
-                "schema": {
-                    "type": "function",
-                    "function": {
-                        "name": "list_tools",
-                        "description": "List all available tools.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {}
-                        }
+            {
+                "type": "function",
+                "function": {
+                    "name": "create_agent",
+                    "description": "Create a specialized agent with tools",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Agent name"
+                            },
+                            "description": {
+                                "type": "string",
+                                "description": "Agent's role/purpose"
+                            },
+                            "tool_names": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Names of tools to give agent"
+                            }
+                        },
+                        "required": ["name", "description", "tool_names"]
                     }
                 }
             },
-            "list_agents": {
-                "function": self._list_agents,
-                "schema": {
-                    "type": "function",
-                    "function": {
-                        "name": "list_agents",
-                        "description": "List all created agents.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {}
-                        }
+            {
+                "type": "function",
+                "function": {
+                    "name": "delegate_to_agent",
+                    "description": "Delegate a task to an agent",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "agent_name": {
+                                "type": "string",
+                                "description": "Name of agent to delegate to"
+                            },
+                            "task": {
+                                "type": "string",
+                                "description": "Task description for agent"
+                            }
+                        },
+                        "required": ["agent_name", "task"]
                     }
                 }
             }
-        }
+        ]
+    
+    def _execute_supervisor_tool(self, tool_call: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a supervisor meta-tool."""
+        tool_name = tool_call["function"]["name"]
+        arguments = tool_call["function"]["arguments"]
+        
+        start_time = time.time()
+        
+        try:
+            if tool_name == "create_tool":
+                result = self._create_tool(**arguments)
+            elif tool_name == "create_agent":
+                result = self._create_agent(**arguments)
+            elif tool_name == "delegate_to_agent":
+                result = self._delegate_to_agent(**arguments)
+            else:
+                raise ValueError(f"Unknown supervisor tool: {tool_name}")
+            
+            duration_ms = (time.time() - start_time) * 1000
+            
+            if self.logger:
+                self.logger.log_tool_call(
+                    agent=self.name,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    result=result,
+                    success=True,
+                    duration_ms=duration_ms,
+                    include_result=self.config.logging.include_results
+                )
+            
+            return {"success": True, "result": result}
+        
+        except Exception as e:
+            duration_ms = (time.time() - start_time) * 1000
+            
+            if self.logger:
+                self.logger.log_tool_call(
+                    agent=self.name,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    result=None,
+                    success=False,
+                    duration_ms=duration_ms
+                )
+                
+                self.logger.log_error(
+                    agent=self.name,
+                    error_type=type(e).__name__,
+                    error_message=f"Supervisor tool {tool_name} failed: {e}"
+                )
+            
+            return {"success": False, "error": str(e)}
     
     def _create_tool(
         self,
         name: str,
-        code: str,
         description: str,
-        parameters_schema: Dict
-    ) -> Dict[str, Any]:
-        """Create and register a new tool."""
-        # Test the code first
-        test_result = self.sandbox.execute(code)
+        code: str,
+        parameters: Dict[str, Any]
+    ) -> str:
+        """
+        Create a new tool.
         
-        if not test_result["success"]:
-            return {
-                "success": False,
-                "error": f"Code execution failed: {test_result['error']}"
-            }
+        Args:
+            name: Tool name
+            description: Tool description
+            code: Python function code
+            parameters: Parameter schema
         
-        # Extract function from code
-        try:
-            namespace = {}
-            exec(code, namespace)
-            
-            # Find the function
-            func = None
-            for obj in namespace.values():
-                if callable(obj) and hasattr(obj, '__name__') and obj.__name__ != '__builtins__':
-                    func = obj
-                    break
-            
-            if not func:
-                return {
-                    "success": False,
-                    "error": "No function found in code"
-                }
-            
-            # Create schema
-            schema = {
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "description": description,
-                    "parameters": parameters_schema
-                }
+        Returns:
+            Success message
+        """
+        # Build schema
+        schema = {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": description,
+                "parameters": parameters
             }
-            
-            # Register tool
-            self.tool_registry.register(name, func, schema, code)
-            
-            return {
-                "success": True,
-                "message": f"Tool '{name}' created and registered"
-            }
+        }
         
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"Failed to create tool: {str(e)}"
-            }
+        # Execute code to get function
+        namespace = {}
+        exec(code, namespace)
+        
+        if name not in namespace:
+            raise ValueError(f"Code does not define function '{name}'")
+        
+        tool_func = namespace[name]
+        tool_func.__tool_schema__ = schema
+        
+        # Save to workspace
+        self.workspace.save_tool(name, code, schema)
+        
+        # Add to tools
+        self.tools[name] = tool_func
+        
+        # Log creation
+        if self.logger:
+            self.logger.log_tool_created(
+                agent=self.name,
+                tool_name=name,
+                code=code,
+                schema=schema
+            )
+        
+        return f"Tool '{name}' created successfully"
     
     def _create_agent(
         self,
         name: str,
-        system_prompt: str,
-        tools: list
-    ) -> Dict[str, Any]:
-        """Create and register a new agent."""
-        # Get requested tools
-        agent_tools = {}
-        for tool_name in tools:
-            tool = self.tool_registry.get(tool_name)
-            if tool:
-                agent_tools[tool_name] = tool
+        description: str,
+        tool_names: List[str]
+    ) -> str:
+        """
+        Create a new agent.
+        
+        Args:
+            name: Agent name
+            description: Agent purpose/role
+            tool_names: Tools to give agent
+        
+        Returns:
+            Success message
+        """
+        # Get tools
+        tools = []
+        for tool_name in tool_names:
+            if tool_name not in self.tools:
+                raise ValueError(f"Tool '{tool_name}' does not exist")
+            tools.append(self.tools[tool_name])
+        
+        # Build system prompt
+        system_prompt = f"{description}\n\nYou have access to the following tools: {', '.join(tool_names)}"
         
         # Create agent
         agent = Agent(
             name=name,
             system_prompt=system_prompt,
+            tools=tools,
             llm_client=self.llm_client,
-            tools=agent_tools
+            config=self.config,
+            logger=self.logger
         )
         
-        # Register agent
-        config = {
-            "system_prompt": system_prompt,
-            "tools": tools
-        }
-        self.agent_registry.register(name, agent, config)
+        # Save to workspace
+        self.workspace.save_agent(name, system_prompt, tool_names)
         
-        return {
-            "success": True,
-            "message": f"Agent '{name}' created with {len(agent_tools)} tools"
-        }
-    
-    def _execute_code(self, code: str, test_inputs: Dict = None) -> Dict[str, Any]:
-        """Execute code in sandbox."""
-        result = self.sandbox.execute(code, test_inputs)
-        return {
-            "success": result["success"],
-            "output": result["output"],
-            "error": result["error"]
-        }
-
-    def _run_command(
-        self,
-        command: str,
-        args: list,
-        input_data: str = None
-    ) -> dict[str, any]:
-        """Execute unix command."""
-        result = self.sandbox.execute_command(
-            command=command,
-            args=args,
-            input_data=input_data
-        )
+        # Add to agents
+        self.agents[name] = agent
         
-        return {
-            "success": result["success"],
-            "output": result["output"],
-            "error": result["error"],
-            "returncode": result["returncode"]
-        }
-
-
-    def _run_shell(self, command_line: str) -> dict[str, any]:
-        """Execute shell command line."""
-        result = self.sandbox.execute_shell(command_line)
+        # Log creation
+        if self.logger:
+            self.logger.log_agent_created(
+                creator_agent=self.name,
+                agent_name=name,
+                system_prompt=system_prompt,
+                tools=tool_names
+            )
         
-        return {
-            "success": result["success"],
-            "output": result["output"],
-            "error": result["error"],
-            "returncode": result["returncode"]
-        }
-
-    
-    def _read_instructions(self, filename: str) -> str:
-        """Read instruction file."""
-        file_path = self.instructions_dir / filename
-        
-        if not file_path.exists():
-            return f"Error: Instruction file '{filename}' not found"
-        
-        with open(file_path, 'r') as f:
-            return f.read()
+        return f"Agent '{name}' created successfully with tools: {', '.join(tool_names)}"
     
     def _delegate_to_agent(
         self,
         agent_name: str,
-        task: str,
-        context: Dict = None
-    ) -> Dict[str, Any]:
-        """Delegate task to an agent."""
-        agent = self.agent_registry.get(agent_name)
+        task: str
+    ) -> Any:
+        """
+        Delegate a task to an agent.
         
-        if not agent:
-            return {
-                "success": False,
-                "error": f"Agent '{agent_name}' not found"
-            }
+        Args:
+            agent_name: Name of agent
+            task: Task description
         
-        result = agent.run(task, context)
+        Returns:
+            Agent's result
+        """
+        if agent_name not in self.agents:
+            raise ValueError(f"Agent '{agent_name}' does not exist")
         
-        return {
-            "success": True,
-            "agent": agent_name,
-            "response": result["content"]
-        }
-    
-    def _list_tools(self) -> Dict[str, list]:
-        """List all available tools."""
-        return {
-            "tools": self.tool_registry.list_tools()
-        }
-    
-    def _list_agents(self) -> Dict[str, list]:
-        """List all created agents."""
-        return {
-            "agents": self.agent_registry.list_agents()
-        }
+        agent = self.agents[agent_name]
+        
+        # Log delegation
+        if self.logger:
+            self.logger.log_agent_delegated(
+                from_agent=self.name,
+                to_agent=agent_name,
+                task=task
+            )
+        
+        # Run agent
+        result = agent.run(task)
+        
+        if not result["success"]:
+            raise RuntimeError(f"Agent '{agent_name}' failed: {result.get('error', 'Unknown error')}")
+        
+        return result["result"]
