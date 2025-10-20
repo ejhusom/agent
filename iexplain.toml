@@ -1,0 +1,51 @@
+# iExplain Configuration File
+# Save as .iexplain.toml (project) or ~/.config/iexplain/config.toml (user)
+
+[workspace]
+# Custom workspace directories (optional, auto-detected by default)
+# tools_dir = "./iexplain/tools"
+# agents_dir = "./iexplain/agents"
+# workspace_dir = "./iexplain/workspace"
+
+[sandbox]
+# Code execution timeout in seconds
+timeout = 10
+
+# Allow tools to write files in workspace (default: false for safety)
+allow_write = false
+
+[llm]
+# LLM provider (anthropic, openai, ollama)
+provider = "anthropic"
+
+# Model to use
+model = "claude-sonnet-4-20250514"
+
+# Temperature for generation (0.0 = deterministic, 1.0 = creative)
+temperature = 0.0
+
+# Maximum tokens per completion
+max_tokens = 4096
+
+[agent]
+# Maximum iterations for agent loop
+max_iterations = 20
+
+# Whether to stop agent on tool error (false = continue with error message)
+fail_on_tool_error = false
+
+[logging]
+# Enable conversation logging
+enabled = true
+
+# Custom log directory (optional, uses workspace/logs by default)
+# log_dir = "./logs"
+
+# Log full LLM messages (useful for debugging)
+include_messages = true
+
+# Log tool results (useful for debugging)
+include_results = true
+
+# Auto-delete logs older than this many days (null = keep forever)
+retention_days = 30

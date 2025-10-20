@@ -1,7 +1,12 @@
-# iExplain v2 Dependencies
+# Dependencies
 
 # LLM client
 litellm>=1.0.0
 
-# Standard library only - no other dependencies needed!
-# The system is designed to be minimal and self-contained.
+# TOML parsing (Python 3.11+ has tomllib built-in)
+tomli>=2.0.0; python_version < "3.11"
+tomli-w>=1.0.0  # For writing TOML files
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
