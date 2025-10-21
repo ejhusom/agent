@@ -16,6 +16,7 @@ class AgentError(Exception):
     """Agent-related errors."""
     pass
 
+from .config import config
 
 class Agent:
     """
@@ -34,8 +35,12 @@ class Agent:
         system_prompt: str,
         tools: List[Callable],
         llm_client: Any,
-        config: Config,
-        logger: Optional[ConversationLogger] = None
+        provider: str = None,
+        model: str = None,
+        tools: Dict[str, Dict[str, Any]] = None,
+        temperature: float = None,
+        max_tokens: int = None,
+        logging_enabled: bool = True,
     ):
         """
         Initialize agent.
@@ -52,21 +57,19 @@ class Agent:
         self.system_prompt = system_prompt
         self.tools = tools
         self.llm_client = llm_client
-        self.config = config
-        self.logger = logger
-        
-        # Build tool schemas for LLM
-        self.tool_schemas = self._build_tool_schemas()
+        self.tools = tools or {}
+        self.history = []
+        self.provider = provider if provider is not None else config.get("provider", None)
+        self.model = model if model is not None else config.get("model", None)
+        self.temperature = temperature if temperature is not None else config.get("temperature", 0.0)
+        self.max_tokens = max_tokens if max_tokens is not None else config.get("max_tokens", 8192)
     
-    def _build_tool_schemas(self) -> List[Dict[str, Any]]:
-        """Build tool schemas from functions."""
-        schemas = []
-        for tool in self.tools:
-            if hasattr(tool, '__tool_schema__'):
-                schemas.append(tool.__tool_schema__)
-        return schemas
-    
-    def run(self, message: str) -> Dict[str, Any]:
+    def run(
+        self,
+        message: str,
+        context: Dict[str, Any] = None,
+        max_iterations: int = 20,
+    ) -> Dict[str, Any]:
         """
         Run agent on a message.
         
@@ -76,19 +79,106 @@ class Agent:
         Returns:
             Dict with success, result, and metadata
         """
-        # Log agent start
-        if self.logger:
-            self.logger.log_event(
-                event_type="agent_start",
-                agent=self.name,
-                data={"message": message}
-            )
+        messages = []
         
-        # Initialize conversation
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": message}
-        ]
+        # Add context if provided
+        if context:
+            context_text = "\n".join(f"{k}: {v}" for k, v in context.items())
+            messages.append({
+                "role": "user",
+                "content": f"Context:\n{context_text}\n\nTask: {message}"
+            })
+        else:
+            messages.append({"role": "user", "content": message})
+        
+        # Get tool schemas
+        tool_schemas = self._get_tool_schemas() if self.tools else None
+        
+        all_tool_calls = []
+        iteration = 0
+        
+        # Agentic loop
+        while iteration < max_iterations:
+            iteration += 1
+            
+            # Call LLM
+            response = self.llm_client.complete(
+                messages=messages,
+                system=self.system_prompt,
+                tools=tool_schemas,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature
+            )
+            
+            self.history.append({
+                "iteration": iteration,
+                "response": response
+            })
+
+            # Print response for debugging
+            print(f"=== Iteration {iteration} of agent {self.name} ===")
+            print("Response Content:")
+            print(response["content"])
+            if response["tool_calls"]:
+                print("Tool Calls:")
+                for tc in response["tool_calls"]:
+                    print(json.dumps(tc, indent=2))
+            print("-----------------------\n")
+
+            
+            # No tool calls? Done
+            if not response["tool_calls"]:
+                return {
+                    "content": response["content"],
+                    "tool_calls": all_tool_calls,
+                    "history": self.history
+                }
+            
+            # Execute tools
+            messages.append({
+                "role": "assistant",
+                "content": response["content"],
+                "tool_calls": self._format_tool_calls(response["tool_calls"])
+            })
+            
+            for tool_call in response["tool_calls"]:
+                tool_name = tool_call["name"]
+                all_tool_calls.append(tool_call)
+                
+                # Execute tool
+                try:
+                    result = self._execute_tool(tool_name, tool_call["arguments"])
+                    result_content = json.dumps(result) if isinstance(result, dict) else str(result)
+                except Exception as e:
+                    result_content = f"Error: {str(e)}"
+                
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.get("id"),
+                    "name": tool_name,
+                    "content": result_content
+                })
+
+                # Print tool execution result
+                print(f"Tool '{tool_name}' executed. Result:")
+                print(result_content)
+                print("-----------------------\n")
+
+        # Max iterations reached
+        return {
+            "content": "Max iterations reached",
+            "tool_calls": all_tool_calls,
+            "history": self.history
+        }
+    
+    def _get_tool_schemas(self) -> List[Dict]:
+        """Get tool schemas for LLM."""
+        return [tool["schema"] for tool in self.tools.values()]
+    
+    def _execute_tool(self, name: str, arguments: str) -> Any:
+        """Execute a tool."""
+        if name not in self.tools:
+            raise ValueError(f"Tool '{name}' not found")
         
         iterations = 0
         max_iterations = self.config.agent.max_iterations

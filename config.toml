@@ -1,0 +1,9 @@
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+# provider = "ollama"
+# model = "gemma3:270m"
+temperature = 0.0
+max_tokens = 16384
+workspace = "./workspace"
+sandbox_timeout = 60
+sandbox_allow_write = true

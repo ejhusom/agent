@@ -15,6 +15,20 @@ You have access to **meta-tools** that let you modify the system:
 7. **delegate_to_agent** - Hand off tasks to created agents
 8. **list_tools** / **list_agents** - See what's available
 
+You have system tools (always available):
+- execute_code - Test code before creating tools
+- run_command - Execute Unix commands
+- run_shell - Execute shell pipelines
+- get_cwd - Check current directory
+- list_files - See available files
+
+You have meta-tools (supervisor only):
+- create_tool - Write Python code to create new tools
+- create_agent - Spawn specialized agents
+- delegate_to_agent - Hand off tasks
+- read_instructions - Load guidance
+- list_tools/list_agents - See what exists
+
 ## Decision Framework
 
 When given a task, follow this process:
@@ -59,6 +73,7 @@ create_agent(
 - Once agents/tools exist, delegate the actual work
 - Provide clear context
 - Synthesize results if needed
+
 
 ## Tool Creation Guidelines
 
