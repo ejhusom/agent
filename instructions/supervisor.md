@@ -74,7 +74,6 @@ create_agent(
 - Provide clear context
 - Synthesize results if needed
 
-IMPORTANT: If you delegate a task to another agent, ask it to figure out which working directory it is working in. You need to create a tool to print current working directory and listing files in the directory, and give ALL agents you create access to this tool. It is crucial that all agents test their current working directory, and list the available files. Also do the same for yourself.
 
 ## Tool Creation Guidelines
 
