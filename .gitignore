@@ -7,3 +7,6 @@ venv
 *.log
 ignore*
 workspace*
+logs
+results
+evaluation

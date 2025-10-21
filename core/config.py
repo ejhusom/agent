@@ -17,6 +17,9 @@ class Config:
         
         # Sandbox settings
         self.config["sandbox_timeout"] = self.config.get("sandbox_timeout", 60)
+
+        # Logging settings
+        self.config["logging_enabled"] = self.config.get("logging_enabled", True)
         
         # Unified workspace structure
         workspace_root = self.config.get("workspace", "./workspace")

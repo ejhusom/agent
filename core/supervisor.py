@@ -7,6 +7,7 @@ from pathlib import Path
 from .agent import Agent
 from .config import config
 from .llm_client import LLMClient
+from .logger import get_logger
 from .sandbox import Sandbox
 from .standard_tools import get_standard_tools
 from registry.tool_registry import ToolRegistry
@@ -55,7 +56,25 @@ class Supervisor:
     
     def run(self, message: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
         """Execute supervisor on a task."""
-        return self.agent.run(message, context)
+        # Start logging
+        logger = get_logger()
+        session_id = logger.start_session(
+            task=message,
+            config={
+                "provider": self.llm_client.provider,
+                "model": self.llm_client.model,
+                "temperature": self.agent.temperature,
+                "max_tokens": self.agent.max_tokens
+            }
+        )
+
+        result = self.agent.run(message, context)
+
+        # End logging
+        log_file = logger.end_session(final_result=result["content"])
+        print(f"\nSession log saved to: {log_file}")
+
+        return result
     
     def _load_system_prompt(self) -> str:
         """Load supervisor system prompt from instructions."""
@@ -357,7 +376,7 @@ Be strategic and efficient."""
                 "error": f"Agent '{agent_name}' not found"
             }
         
-        result = agent.run(task, context)
+        result = agent.run(task, context, parent_agent="supervisor")
         
         return {
             "success": True,

@@ -26,6 +26,9 @@ class LLMClient:
         elif self.provider == "openai" and self.api_key:
             os.environ["OPENAI_KEY"] = self.api_key
 
+        # For Ollama, prefix model name with "ollama_chat/"
+        if self.provider == "ollama" and not model.startswith("ollama/") and not model.startswith("ollama_chat/"):
+            self.model = f"ollama_chat/{model}"
 
     def complete(
         self,

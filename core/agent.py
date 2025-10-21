@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Optional
 import json
 
 from .config import config
+from .logger import get_logger
 
 class Agent:
     """Simple agent: LLM + tools."""
@@ -21,7 +22,7 @@ class Agent:
         tools: Dict[str, Dict[str, Any]] = None,
         temperature: float = None,
         max_tokens: int = None,
-        logging_enabled: bool = True,
+        logging_enabled: bool = None,
     ):
         """
         Args:
@@ -39,12 +40,17 @@ class Agent:
         self.model = model if model is not None else config.get("model", None)
         self.temperature = temperature if temperature is not None else config.get("temperature", 0.0)
         self.max_tokens = max_tokens if max_tokens is not None else config.get("max_tokens", 8192)
+        self.logging_enabled = logging_enabled if logging_enabled is not None else config.get("logging_enabled")
+
+        self.logger = get_logger() if self.logging_enabled else None
+        self.current_interaction_idx = None
     
     def run(
         self,
         message: str,
         context: Dict[str, Any] = None,
         max_iterations: int = 20,
+        parent_agent: str = None,
     ) -> Dict[str, Any]:
         """
         Execute agent on a message.
@@ -56,6 +62,15 @@ class Agent:
                 "history": List[Dict]
             }
         """
+
+        if self.logger:
+            self.current_interaction_idx = self.logger.log_agent_start(
+                agent_name=self.name,
+                message=message,
+                context=context,
+                parent_agent=parent_agent
+            )
+
         messages = []
         
         # Add context if provided
@@ -105,6 +120,28 @@ class Agent:
             
             # No tool calls? Done
             if not response["tool_calls"]:
+                # Log iteration without tool calls
+                if self.logger and self.current_interaction_idx is not None:
+                    self.logger.log_iteration(
+                        interaction_idx=self.current_interaction_idx,
+                        iteration=iteration,
+                        response_content=response["content"],
+                        tool_calls=response["tool_calls"],
+                        model_info={
+                            "model": response.get("model"),
+                            "usage": response.get("usage"),
+                            "finish_reason": response.get("finish_reason")
+                        }
+                    )
+
+                # End logging of agent
+                if self.logger and self.current_interaction_idx is not None:
+                    self.logger.log_agent_end(
+                        interaction_idx=self.current_interaction_idx,
+                        result=response["content"],  # or "Max iterations reached"
+                        total_tool_calls=len(all_tool_calls)
+                    )
+
                 return {
                     "content": response["content"],
                     "tool_calls": all_tool_calls,
@@ -140,6 +177,32 @@ class Agent:
                 print(f"Tool '{tool_name}' executed. Result:")
                 print(result_content)
                 print("-----------------------\n")
+
+            if self.logger and self.current_interaction_idx is not None:
+                self.logger.log_iteration(
+                    interaction_idx=self.current_interaction_idx,
+                    iteration=iteration,
+                    response_content=response["content"],
+                    tool_calls=response["tool_calls"],
+                    model_info={
+                        "model": response.get("model"),
+                        "usage": response.get("usage"),
+                        "finish_reason": response.get("finish_reason")
+                    },
+                    tool_call_results=[{
+                        "name": tc["name"],
+                        "arguments": tc["arguments"],
+                        "id": tc.get("id"),
+                        "result": json.dumps(self._execute_tool(tc["name"], tc["arguments"])) if isinstance(self._execute_tool(tc["name"], tc["arguments"]), dict) else str(self._execute_tool(tc["name"], tc["arguments"]))
+                    } for tc in response["tool_calls"]]
+                )
+
+        if self.logger and self.current_interaction_idx is not None:
+            self.logger.log_agent_end(
+                interaction_idx=self.current_interaction_idx,
+                result="Max iterations reached",
+                total_tool_calls=len(all_tool_calls)
+            )
 
         # Max iterations reached
         return {

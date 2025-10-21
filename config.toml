@@ -1,7 +1,10 @@
-provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+# provider = "anthropic"
+# model = "claude-sonnet-4-20250514"
+provider = "openai"
+model = "gpt-4o-mini"
 # provider = "ollama"
-# model = "gemma3:270m"
+# model = "gpt-oss:120b-cloud"
+# model = "gpt-oss:20b-cloud"
 temperature = 0.0
 max_tokens = 16384
 workspace = "./workspace"
