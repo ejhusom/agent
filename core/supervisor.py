@@ -2,12 +2,13 @@
 Supervisor: Main orchestration loop with meta-tools.
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, List
 from pathlib import Path
 from .agent import Agent
 from .config import config
 from .llm_client import LLMClient
 from .sandbox import Sandbox
+from .standard_tools import get_standard_tools
 from registry.tool_registry import ToolRegistry
 from registry.agent_registry import AgentRegistry
 
@@ -16,6 +17,7 @@ class Supervisor:
     Supervisor agent with meta-tools for self-modification.
     
     Can create tools, create agents, execute code, and delegate tasks.
+    Has access to both meta-tools AND standard tools.
     """
     
     def __init__(
@@ -35,28 +37,24 @@ class Supervisor:
         self.llm_client = llm_client
         self.tool_registry = tool_registry
         self.agent_registry = agent_registry
-        self.sandbox = Sandbox(
-            timeout=config.get("sandbox_timeout"),
-            workspace=config.get("sandbox_workspace"),
-            allow_write=config.get("sandbox_allow_write")
-        )
+        self.sandbox = Sandbox()  # Uses workspace/data by default
         self.instructions_dir = Path(instructions_dir)
         
-        # Create supervisor agent with meta-tools
+        # Get standard tools (supervisor has access to these too)
+        self.standard_tools = get_standard_tools(self.sandbox)
+        
+        # Create supervisor agent with both meta-tools and standard tools
+        all_tools = {**self._get_meta_tools(), **self.standard_tools}
+        
         self.agent = Agent(
             name="supervisor",
             system_prompt=self._load_system_prompt(),
             llm_client=llm_client,
-            tools=self._get_meta_tools(),
+            tools=all_tools,
         )
     
     def run(self, message: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
-        """
-        Execute supervisor on a task.
-        
-        Returns:
-            Agent response dict
-        """
+        """Execute supervisor on a task."""
         return self.agent.run(message, context)
     
     def _load_system_prompt(self) -> str:
@@ -73,9 +71,11 @@ class Supervisor:
 You can:
 - Create new tools by writing Python code
 - Create specialized agents for subtasks
-- Execute code to test tools
-- Read instruction files for guidance
+- Execute code and Unix commands
+- Read/write files
 - Delegate tasks to created agents
+
+Standard tools available: execute_python, run_command, run_shell, read_file, write_file, list_files, pwd
 
 Think step by step:
 1. Understand the task
@@ -87,7 +87,7 @@ Think step by step:
 Be strategic and efficient."""
     
     def _get_meta_tools(self) -> Dict[str, Dict[str, Any]]:
-        """Get meta-tools for supervisor."""
+        """Get meta-tools for supervisor (tools that modify the system)."""
         return {
             "create_tool": {
                 "function": self._create_tool,
@@ -142,84 +142,10 @@ Be strategic and efficient."""
                                 "tools": {
                                     "type": "array",
                                     "items": {"type": "string"},
-                                    "description": "List of tool names this agent can use"
+                                    "description": "List of tool names from registry AND/OR standard tools (execute_python, run_command, run_shell, read_file, write_file, list_files, pwd)"
                                 }
                             },
                             "required": ["name", "system_prompt", "tools"]
-                        }
-                    }
-                }
-            },
-            "execute_code": {
-                "function": self._execute_code,
-                "schema": {
-                    "type": "function",
-                    "function": {
-                        "name": "execute_code",
-                        "description": "Execute Python code in a safe sandbox. Use this to test code before creating tools.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "code": {
-                                    "type": "string",
-                                    "description": "Python code to execute"
-                                },
-                                "test_inputs": {
-                                    "type": "object",
-                                    "description": "Test inputs as key-value pairs"
-                                }
-                            },
-                            "required": ["code"]
-                        }
-                    }
-                }
-            },
-            "run_command": {
-                "function": self._run_command,
-                "schema": {
-                    "type": "function",
-                    "function": {
-                        "name": "run_command",
-                        "description": "Execute a Unix command (grep, awk, sed, find, etc.). Safe and sandboxed.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "command": {
-                                    "type": "string",
-                                    "description": "Command name (e.g., 'grep', 'find', 'awk')"
-                                },
-                                "args": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                    "description": "Command arguments as list"
-                                },
-                                "input_data": {
-                                    "type": "string",
-                                    "description": "Optional stdin data to pipe to command"
-                                }
-                            },
-                            "required": ["command", "args"]
-                        }
-                    }
-                }
-            },
-
-            "run_shell": {
-                "function": self._run_shell,
-                "schema": {
-                    "type": "function",
-                    "function": {
-                        "name": "run_shell",
-                        "description": "Execute a shell command line with pipes and redirects. Use for complex Unix pipelines.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "command_line": {
-                                    "type": "string",
-                                    "description": "Shell command with pipes (e.g., 'grep ERROR log.txt | wc -l')"
-                                }
-                            },
-                            "required": ["command_line"]
                         }
                     }
                 }
@@ -278,7 +204,7 @@ Be strategic and efficient."""
                     "type": "function",
                     "function": {
                         "name": "list_tools",
-                        "description": "List all available tools.",
+                        "description": "List all available tools (from registry and standard tools).",
                         "parameters": {
                             "type": "object",
                             "properties": {}
@@ -365,16 +291,27 @@ Be strategic and efficient."""
         self,
         name: str,
         system_prompt: str,
-        tools: list
+        tools: List[str]
     ) -> Dict[str, Any]:
         """Create and register a new agent."""
-        # Get requested tools
+        # Collect tools from both registry and standard tools
         agent_tools = {}
+        
         for tool_name in tools:
-            tool = self.tool_registry.get(tool_name)
-            if tool:
-                agent_tools[tool_name] = tool
-
+            # Check standard tools first
+            if tool_name in self.standard_tools:
+                agent_tools[tool_name] = self.standard_tools[tool_name]
+            # Then check registry
+            else:
+                tool = self.tool_registry.get(tool_name)
+                if tool:
+                    agent_tools[tool_name] = tool
+                else:
+                    return {
+                        "success": False,
+                        "error": f"Tool '{tool_name}' not found in registry or standard tools"
+                    }
+        
         # Create agent
         agent = Agent(
             name=name,
@@ -384,42 +321,16 @@ Be strategic and efficient."""
         )
         
         # Register agent
-        config = {
+        config_data = {
             "system_prompt": system_prompt,
             "tools": tools
         }
-        self.agent_registry.register(name, agent, config)
+        self.agent_registry.register(name, agent, config_data)
         
         return {
             "success": True,
             "message": f"Agent '{name}' created with {len(agent_tools)} tools"
         }
-    
-    def _execute_code(self, code: str, test_inputs: Dict = None) -> Dict[str, Any]:
-        """Execute code in sandbox."""
-        result = self.sandbox.execute(code, test_inputs)
-        return {
-            "success": result["success"],
-            "output": result["output"],
-            "error": result["error"]
-        }
-
-    def _run_command(
-        self,
-        command: str,
-        args: list,
-        input_data: str = None
-    ) -> dict[str, any]:
-        """Execute unix command."""
-        return self.sandbox.execute_command(
-            command=command,
-            args=args,
-            input_data=input_data
-        )
-
-    def _run_shell(self, command_line: str) -> dict[str, any]:
-        """Execute shell command line."""
-        return self.sandbox.execute_shell(command_line)
     
     def _read_instructions(self, filename: str) -> str:
         """Read instruction file."""
@@ -454,10 +365,15 @@ Be strategic and efficient."""
             "response": result["content"]
         }
     
-    def _list_tools(self) -> Dict[str, list]:
+    def _list_tools(self) -> Dict[str, Any]:
         """List all available tools."""
+        registry_tools = self.tool_registry.list_tools()
+        standard_tool_names = list(self.standard_tools.keys())
+        
         return {
-            "tools": self.tool_registry.list_tools()
+            "registry_tools": registry_tools,
+            "standard_tools": standard_tool_names,
+            "all_tools": registry_tools + standard_tool_names
         }
     
     def _list_agents(self) -> Dict[str, list]:

@@ -35,18 +35,15 @@ class Sandbox:
         self,
         timeout: int = None,
         workspace: str = None,
-        allow_write: bool = None,
     ):
         """
         Args:
             timeout: Execution timeout in seconds
-            workspace: Directory for code execution
-            allow_write: Whether to allow file writing in workspace
+            workspace: Directory for code execution (defaults to workspace/data)
         """
         self.timeout = timeout if timeout else config.get("sandbox_timeout")
-        self.workspace = Path(workspace) if workspace else Path(config.get("sandbox_workspace"))
-        self.workspace.mkdir(exist_ok=True)
-        self.allow_write = allow_write if allow_write else config.get("sandbox_allow_write")
+        self.workspace = Path(workspace) if workspace else Path(config.get("workspace_data"))
+        self.workspace.mkdir(parents=True, exist_ok=True)
     
     def execute(self, code: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
         """
@@ -323,30 +320,3 @@ if 'result' in locals():
                 except:
                     return result_str
         return None
-    
-    def test_tool(self, tool_code: str, test_inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Test a tool function with inputs.
-        
-        Args:
-            tool_code: Function definition
-            test_inputs: Arguments to pass
-        
-        Returns:
-            Execution result
-        """
-        test_code = f"""
-{tool_code}
-
-# Extract function name (assume first 'def')
-import re
-func_match = re.search(r'def\\s+(\\w+)\\s*\\(', '''{tool_code}''')
-func_name = func_match.group(1) if func_match else None
-
-if func_name:
-    import json
-    inputs = {json.dumps(test_inputs)}
-    result = globals()[func_name](**inputs)
-"""
-        
-        return self.execute(test_code)

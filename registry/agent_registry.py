@@ -6,20 +6,21 @@ Agents can be created at runtime by the supervisor.
 import json
 from typing import Dict, Any
 from pathlib import Path
+from core.config import config
 
 
 class AgentRegistry:
     """Manages dynamically created agents."""
     
-    def __init__(self, persist_dir: str = "/tmp/iexplain-agents"):
+    def __init__(self, persist_dir: str = None):
         """
         Args:
-            persist_dir: Directory to save agent definitions
+            persist_dir: Directory to save agent definitions (defaults to workspace/agents)
         """
         self.agents: Dict[str, Any] = {}  # Name -> Agent instance
         self.configs: Dict[str, Dict] = {}  # Name -> config for persistence
-        self.persist_dir = Path(persist_dir)
-        self.persist_dir.mkdir(exist_ok=True)
+        self.persist_dir = Path(persist_dir) if persist_dir else Path(config.get("workspace_agents"))
+        self.persist_dir.mkdir(parents=True, exist_ok=True)
     
     def register(
         self,

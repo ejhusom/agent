@@ -6,19 +6,20 @@ Tools can be registered at runtime from generated code.
 import json
 from typing import Dict, Any, Callable
 from pathlib import Path
+from core.config import config
 
 
 class ToolRegistry:
     """Manages dynamically created tools."""
     
-    def __init__(self, persist_dir: str = "/tmp/iexplain-tools"):
+    def __init__(self, persist_dir: str = None):
         """
         Args:
-            persist_dir: Directory to save tool definitions
+            persist_dir: Directory to save tool definitions (defaults to workspace/tools)
         """
         self.tools: Dict[str, Dict[str, Any]] = {}
-        self.persist_dir = Path(persist_dir)
-        self.persist_dir.mkdir(exist_ok=True)
+        self.persist_dir = Path(persist_dir) if persist_dir else Path(config.get("workspace_tools"))
+        self.persist_dir.mkdir(parents=True, exist_ok=True)
         
         # Load persisted tools
         self._load_persisted_tools()
@@ -107,7 +108,7 @@ class ToolRegistry:
                 if not func:
                     # Find first function
                     for obj in namespace.values():
-                        if callable(obj) and obj.__name__ != '__builtins__':
+                        if callable(obj) and hasattr(obj, '__name__') and obj.__name__ != '__builtins__':
                             func = obj
                             break
                 

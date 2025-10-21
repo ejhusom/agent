@@ -26,6 +26,7 @@ def completion(
     Compatible with OpenAI, Anthropic, and Ollama APIs.
     
     Args:
+        provider: (required) LLM provider ("openai", "anthropic", "ollama")
         model: (required) Model ID to use
         messages: (required) List of message dicts with 'role' and 'content'
         api_key: API key (or from OPENAI_API_KEY/ANTHROPIC_API_KEY env vars)
@@ -104,14 +105,23 @@ def _query_anthropic(messages, model, api_key, **kwargs):
         "Content-Type": "application/json"
     }
     
+    # Filter to Anthropic-supported parameters
+    supported = ['max_tokens', 'temperature', 'top_p', 'top_k', 'stop_sequences', 'stream', 'system']
+    anthropic_kwargs = {k: v for k, v in kwargs.items() if k in supported}
+    
+    # Map 'stop' to 'stop_sequences' for Anthropic
+    if 'stop' in kwargs and 'stop_sequences' not in anthropic_kwargs:
+        stop = kwargs['stop']
+        anthropic_kwargs['stop_sequences'] = [stop] if isinstance(stop, str) else stop
+    
     # Anthropic requires max_tokens
-    if 'max_tokens' not in kwargs:
-        kwargs['max_tokens'] = 1024
+    if 'max_tokens' not in anthropic_kwargs:
+        anthropic_kwargs['max_tokens'] = 1024
     
     data = {
         "model": model,
         "messages": messages,
-        **kwargs
+        **anthropic_kwargs
     }
     resp = requests.post(url, headers=headers, json=data)
     resp.raise_for_status()

@@ -7,7 +7,6 @@ from typing import List, Dict, Any, Optional
 import json
 
 from .config import config
-from .sandbox import Sandbox
 
 class Agent:
     """Simple agent: LLM + tools."""
@@ -23,7 +22,6 @@ class Agent:
         temperature: float = None,
         max_tokens: int = None,
         logging_enabled: bool = True,
-        sandbox: Optional[Sandbox] = None,
     ):
         """
         Args:
@@ -41,12 +39,6 @@ class Agent:
         self.model = model if model is not None else config.get("model", None)
         self.temperature = temperature if temperature is not None else config.get("temperature", 0.0)
         self.max_tokens = max_tokens if max_tokens is not None else config.get("max_tokens", 8192)
-
-        self.sandbox = sandbox or Sandbox(
-            timeout=config.get("sandbox_timeout"),
-            workspace=config.get("sandbox_workspace"),
-            allow_write=config.get("sandbox_allow_write")
-        )
     
     def run(
         self,
@@ -100,8 +92,8 @@ class Agent:
                 "response": response
             })
 
-            # Print response for debugging. Print in a way that is easy to read. Include tool calls if any.
-            print(f"=== Iteration {iteration}  of agent {self.name} ===")
+            # Print response for debugging
+            print(f"=== Iteration {iteration} of agent {self.name} ===")
             print("Response Content:")
             print(response["content"])
             if response["tool_calls"]:
@@ -144,19 +136,10 @@ class Agent:
                     "content": result_content
                 })
 
-                # Print tool execution result for debugging
+                # Print tool execution result
                 print(f"Tool '{tool_name}' executed. Result:")
                 print(result_content)
                 print("-----------------------\n")
-
-            # DEBUG: Check for delegation
-            if self.name == "supervisor" and "delegate_to_agent" in [tc["name"] for tc in response["tool_calls"]]:
-                # If supervisor delegated to another agent, break the loop
-                print("Supervisor delegated to another agent.")
-
-            # # DEBUG: Check for whether another agent took over
-            # if self.name != "supervisor":
-            #     breakpoint()
 
         # Max iterations reached
         return {
@@ -188,11 +171,3 @@ class Agent:
                             else json.dumps(tc["arguments"])
             }
         } for tc in tool_calls]
-
-    def _execute_sandboxed_code(self, code: str) -> str:
-        """Execute code in sandbox and return output."""
-        if not self.sandbox:
-            raise RuntimeError("Sandbox not configured for this agent")
-        
-        output = self.sandbox.execute(code)
-        return output

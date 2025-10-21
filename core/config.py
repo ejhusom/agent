@@ -1,35 +1,40 @@
 import os
 import tomli
+from pathlib import Path
 
 class Config:
-    """
-    A simple class for reading and storing configuration from a config.toml file.
-
-    Usage:
-    1. Create an instance of the Config class by providing the path to the config.toml file.
-       Example: config = Config("path/to/config.toml")
-    2. Access the configuration values as attributes.
-       Example: value = config.data["section"]["key"]
-    """
+    """Simple configuration from config.toml with unified workspace."""
 
     def __init__(self, config_path: str):
-        """
-        Initialize the Config class by loading the configuration file.
-
-        :param config_path: Path to the config.toml file.
-        """
+        """Initialize config by loading the config.toml file."""
         self.config = self._load_config(config_path)
 
+        # LLM settings
         self.config["provider"] = self.config.get("provider", "anthropic")
         self.config["model"] = self.config.get("model", "claude-sonnet-4-20250514")
         self.config["temperature"] = self.config.get("temperature", 0.0)
         self.config["max_tokens"] = self.config.get("max_tokens", 8192)
+        
+        # Sandbox settings
         self.config["sandbox_timeout"] = self.config.get("sandbox_timeout", 60)
-        self.config["sandbox_workspace"] = self.config.get("sandbox_workspace", "./workspace")
-        self.config["sandbox_allow_write"] = self.config.get("sandbox_allow_write", False)
-        self.config["agents_persist_dir"] = self.config.get("agents_persist_dir", "./workspace-agents")
-        self.config["tools_persist_dir"] = self.config.get("tools_persist_dir", "./workspace-tools")
+        
+        # Unified workspace structure
+        workspace_root = self.config.get("workspace", "./workspace")
+        self.config["workspace"] = workspace_root
+        self.config["workspace_data"] = f"{workspace_root}/data"
+        self.config["workspace_agents"] = f"{workspace_root}/agents"
+        self.config["workspace_tools"] = f"{workspace_root}/tools"
+        
+        # Create workspace directories
+        for path in [
+            self.config["workspace"],
+            self.config["workspace_data"],
+            self.config["workspace_agents"],
+            self.config["workspace_tools"]
+        ]:
+            Path(path).mkdir(parents=True, exist_ok=True)
 
+        # API key handling
         if "api_key" in self.config:
             self.config["api_key"] = self.config["api_key"]
         elif self.config["provider"] in ["anthropic", "openai"]:
@@ -45,12 +50,7 @@ class Config:
             self.config["api_key"] = None
 
     def _load_config(self, config_path: str) -> dict:
-        """
-        Load the configuration file.
-
-        :param config_path: Path to the config.toml file.
-        :return: Parsed configuration as a dictionary.
-        """
+        """Load the configuration file."""
         try:
             with open(config_path, "rb") as file:
                 return tomli.load(file)

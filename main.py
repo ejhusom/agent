@@ -17,7 +17,6 @@ from registry.tool_registry import ToolRegistry
 from registry.agent_registry import AgentRegistry
 
 
-
 def main():
     """Run the supervisor agent."""
     
@@ -33,8 +32,8 @@ def main():
         api_key=config.get("api_key", None),
         model=config.get("model", None)
     )
-    tool_registry = ToolRegistry(persist_dir=config.get("tools_persist_dir"))
-    agent_registry = AgentRegistry(persist_dir=config.get("agents_persist_dir"))
+    tool_registry = ToolRegistry()  # Uses workspace/tools by default
+    agent_registry = AgentRegistry()  # Uses workspace/agents by default
     
     supervisor = Supervisor(
         llm_client=llm_client,
@@ -44,6 +43,10 @@ def main():
     )
     
     print(f"- [x] LLM client initialized (provider: {llm_client.provider}, model: {llm_client.model})")
+    print(f"- [x] Workspace: {config.get('workspace')}")
+    print(f"  - Data: {config.get('workspace_data')}")
+    print(f"  - Tools: {config.get('workspace_tools')}")
+    print(f"  - Agents: {config.get('workspace_agents')}")
     print(f"- [x] Tool registry initialized ({len(tool_registry.list_tools())} tools)")
     print(f"- [x] Agent registry initialized ({len(agent_registry.list_agents())} agents)")
     print(f"- [x] Supervisor ready")
@@ -91,7 +94,9 @@ def main():
                     continue
                 
                 if user_input.lower() == '/tools':
-                    print(f"Available tools: {tool_registry.list_tools()}")
+                    tools_info = supervisor._list_tools()
+                    print(f"Registry tools: {tools_info['registry_tools']}")
+                    print(f"Standard tools: {tools_info['standard_tools']}")
                     continue
                 
                 if user_input.lower() == '/agents':
@@ -125,6 +130,15 @@ Commands:
   /agents     List created agents
   /help       Show this help
   /exit       Quit
+
+Standard tools available to all agents:
+  - execute_python: Run Python code in sandbox
+  - run_command: Execute Unix commands (grep, awk, etc.)
+  - run_shell: Execute shell command lines with pipes
+  - read_file: Read files from workspace
+  - write_file: Write files to workspace
+  - list_files: List directory contents
+  - pwd: Show current working directory
 
 Examples:
   >>> Create a tool to parse OpenStack logs

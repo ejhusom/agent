@@ -3,13 +3,7 @@ Simplified LLM client using LiteLLM.
 """
 import os
 from typing import List, Dict, Optional, Any
-import time
-start = time.time()
 from litellm import completion
-end = time.time()
-print(f"Imported litellm in {end - start:.2f} seconds")
-
-# from .llm_api import completion
 
 class LLMClient:
     """Unified LLM interface."""
@@ -53,7 +47,6 @@ class LLMClient:
         """
 
         kwargs = {
-            # "provider": self.provider,
             "model": self.model,
             "messages": messages,
             "max_tokens": max_tokens,
