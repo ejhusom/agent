@@ -1,21 +1,9 @@
 """
-Supervisor with integrated Config, Workspace, and Logger support.
-
-The Supervisor is a meta-agent that can:
-1. Create tools dynamically
-2. Create specialized agents
-3. Delegate tasks to agents
-4. Coordinate multi-agent workflows
-
-All actions are logged and persisted to the workspace.
+Supervisor: Main orchestration loop with meta-tools.
 """
 
 from typing import Dict, Any, List
 from pathlib import Path
-
-from .config import Config
-from .workspace import Workspace
-from .logger import ConversationLogger
 from .agent import Agent
 from .config import config
 from .llm_client import LLMClient
@@ -26,7 +14,7 @@ from registry.agent_registry import AgentRegistry
 
 class Supervisor:
     """
-    Meta-agent that creates tools and agents dynamically.
+    Supervisor agent with meta-tools for self-modification.
     
     Can create tools, create agents, execute code, and delegate tasks.
     Has access to both meta-tools AND standard tools.
@@ -34,19 +22,17 @@ class Supervisor:
     
     def __init__(
         self,
-        llm_client: Any,
-        config: Config,
-        workspace: Workspace,
-        logger: Optional[ConversationLogger] = None
+        llm_client: LLMClient,
+        tool_registry: ToolRegistry,
+        agent_registry: AgentRegistry,
+        instructions_dir: str = "instructions"
     ):
         """
-        Initialize supervisor.
-        
         Args:
-            llm_client: LLM client for completions
-            config: Configuration object
-            workspace: Workspace for persistence
-            logger: Optional conversation logger
+            llm_client: LLM client for API calls
+            tool_registry: Dynamic tool registry
+            agent_registry: Dynamic agent registry
+            instructions_dir: Directory with markdown instructions
         """
         self.llm_client = llm_client
         self.tool_registry = tool_registry
@@ -75,8 +61,9 @@ class Supervisor:
         """Load supervisor system prompt from instructions."""
         prompt_file = self.instructions_dir / "supervisor.md"
         
-        iterations = 0
-        max_iterations = self.config.agent.max_iterations
+        if prompt_file.exists():
+            with open(prompt_file, 'r') as f:
+                return f.read()
         
         # Fallback if file doesn't exist
         return """You are a supervisor agent that orchestrates complex tasks.
@@ -178,16 +165,36 @@ Be strategic and efficient."""
                                     "description": "Filename (e.g., 'tool_creation.md')"
                                 }
                             },
-                            "code": {
-                                "type": "string",
-                                "description": "Python function code"
+                            "required": ["filename"]
+                        }
+                    }
+                }
+            },
+            "delegate_to_agent": {
+                "function": self._delegate_to_agent,
+                "schema": {
+                    "type": "function",
+                    "function": {
+                        "name": "delegate_to_agent",
+                        "description": "Delegate a task to a created agent.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "agent_name": {
+                                    "type": "string",
+                                    "description": "Name of the agent to delegate to"
+                                },
+                                "task": {
+                                    "type": "string",
+                                    "description": "Task description for the agent"
+                                },
+                                "context": {
+                                    "type": "object",
+                                    "description": "Optional context to provide"
+                                }
                             },
-                            "parameters": {
-                                "type": "object",
-                                "description": "JSON schema for function parameters"
-                            }
-                        },
-                        "required": ["name", "description", "code", "parameters"]
+                            "required": ["agent_name", "task"]
+                        }
                     }
                 }
             },
@@ -205,137 +212,80 @@ Be strategic and efficient."""
                     }
                 }
             },
-            {
-                "type": "function",
-                "function": {
-                    "name": "delegate_to_agent",
-                    "description": "Delegate a task to an agent",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "agent_name": {
-                                "type": "string",
-                                "description": "Name of agent to delegate to"
-                            },
-                            "task": {
-                                "type": "string",
-                                "description": "Task description for agent"
-                            }
-                        },
-                        "required": ["agent_name", "task"]
+            "list_agents": {
+                "function": self._list_agents,
+                "schema": {
+                    "type": "function",
+                    "function": {
+                        "name": "list_agents",
+                        "description": "List all created agents.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {}
+                        }
                     }
                 }
             }
-        ]
-    
-    def _execute_supervisor_tool(self, tool_call: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a supervisor meta-tool."""
-        tool_name = tool_call["function"]["name"]
-        arguments = tool_call["function"]["arguments"]
-        
-        start_time = time.time()
-        
-        try:
-            if tool_name == "create_tool":
-                result = self._create_tool(**arguments)
-            elif tool_name == "create_agent":
-                result = self._create_agent(**arguments)
-            elif tool_name == "delegate_to_agent":
-                result = self._delegate_to_agent(**arguments)
-            else:
-                raise ValueError(f"Unknown supervisor tool: {tool_name}")
-            
-            duration_ms = (time.time() - start_time) * 1000
-            
-            if self.logger:
-                self.logger.log_tool_call(
-                    agent=self.name,
-                    tool_name=tool_name,
-                    arguments=arguments,
-                    result=result,
-                    success=True,
-                    duration_ms=duration_ms,
-                    include_result=self.config.logging.include_results
-                )
-            
-            return {"success": True, "result": result}
-        
-        except Exception as e:
-            duration_ms = (time.time() - start_time) * 1000
-            
-            if self.logger:
-                self.logger.log_tool_call(
-                    agent=self.name,
-                    tool_name=tool_name,
-                    arguments=arguments,
-                    result=None,
-                    success=False,
-                    duration_ms=duration_ms
-                )
-                
-                self.logger.log_error(
-                    agent=self.name,
-                    error_type=type(e).__name__,
-                    error_message=f"Supervisor tool {tool_name} failed: {e}"
-                )
-            
-            return {"success": False, "error": str(e)}
+        }
     
     def _create_tool(
         self,
         name: str,
-        description: str,
         code: str,
-        parameters: Dict[str, Any]
-    ) -> str:
-        """
-        Create a new tool.
+        description: str,
+        parameters_schema: Dict
+    ) -> Dict[str, Any]:
+        """Create and register a new tool."""
+        # Test the code first
+        test_result = self.sandbox.execute(code)
         
-        Args:
-            name: Tool name
-            description: Tool description
-            code: Python function code
-            parameters: Parameter schema
-        
-        Returns:
-            Success message
-        """
-        # Build schema
-        schema = {
-            "type": "function",
-            "function": {
-                "name": name,
-                "description": description,
-                "parameters": parameters
+        if not test_result["success"]:
+            return {
+                "success": False,
+                "error": f"Code execution failed: {test_result['error']}"
             }
-        }
         
-        # Execute code to get function
-        namespace = {}
-        exec(code, namespace)
+        # Extract function from code
+        try:
+            namespace = {}
+            exec(code, namespace)
+            
+            # Find the function
+            func = None
+            for obj in namespace.values():
+                if callable(obj) and hasattr(obj, '__name__') and obj.__name__ != '__builtins__':
+                    func = obj
+                    break
+            
+            if not func:
+                return {
+                    "success": False,
+                    "error": "No function found in code"
+                }
+            
+            # Create schema
+            schema = {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": parameters_schema
+                }
+            }
+            
+            # Register tool
+            self.tool_registry.register(name, func, schema, code)
+            
+            return {
+                "success": True,
+                "message": f"Tool '{name}' created and registered"
+            }
         
-        if name not in namespace:
-            raise ValueError(f"Code does not define function '{name}'")
-        
-        tool_func = namespace[name]
-        tool_func.__tool_schema__ = schema
-        
-        # Save to workspace
-        self.workspace.save_tool(name, code, schema)
-        
-        # Add to tools
-        self.tools[name] = tool_func
-        
-        # Log creation
-        if self.logger:
-            self.logger.log_tool_created(
-                agent=self.name,
-                tool_name=name,
-                code=code,
-                schema=schema
-            )
-        
-        return f"Tool '{name}' created successfully"
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Failed to create tool: {str(e)}"
+            }
     
     def _create_agent(
         self,
@@ -366,10 +316,8 @@ Be strategic and efficient."""
         agent = Agent(
             name=name,
             system_prompt=system_prompt,
-            tools=tools,
             llm_client=self.llm_client,
-            config=self.config,
-            logger=self.logger
+            tools=agent_tools
         )
         
         # Register agent
@@ -397,20 +345,19 @@ Be strategic and efficient."""
     def _delegate_to_agent(
         self,
         agent_name: str,
-        task: str
-    ) -> Any:
-        """
-        Delegate a task to an agent.
+        task: str,
+        context: Dict = None
+    ) -> Dict[str, Any]:
+        """Delegate task to an agent."""
+        agent = self.agent_registry.get(agent_name)
         
-        Args:
-            agent_name: Name of agent
-            task: Task description
+        if not agent:
+            return {
+                "success": False,
+                "error": f"Agent '{agent_name}' not found"
+            }
         
-        Returns:
-            Agent's result
-        """
-        if agent_name not in self.agents:
-            raise ValueError(f"Agent '{agent_name}' does not exist")
+        result = agent.run(task, context)
         
         return {
             "success": True,
