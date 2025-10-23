@@ -165,6 +165,12 @@ class Agent:
                     result_content = json.dumps(result) if isinstance(result, dict) else str(result)
                 except Exception as e:
                     result_content = f"Error: {str(e)}"
+
+                # Limit output length
+                max_length = config.get("tool_call_output_max_length")
+
+                if isinstance(result_content, str) and max_length > 0 and len(result_content) > max_length:
+                    result_content = result_content[:max_length] + "...[truncated]. Use another approach that does not require such a long output."
                 
                 messages.append({
                     "role": "tool",

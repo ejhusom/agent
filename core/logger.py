@@ -9,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+from .config import config
+
 
 class InteractionLogger:
     """Logs agent interactions to JSON for later analysis."""
@@ -18,7 +20,7 @@ class InteractionLogger:
         Args:
             log_dir: Directory for logs (defaults to ./logs)
         """
-        self.log_dir = Path(log_dir) if log_dir else Path("./logs")
+        self.log_dir = Path(log_dir) if log_dir else Path(config.get("log_dir"))
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.current_log = None
         self.start_time = None

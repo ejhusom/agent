@@ -61,10 +61,9 @@ class Supervisor:
         session_id = logger.start_session(
             task=message,
             config={
-                "provider": self.llm_client.provider,
-                "model": self.llm_client.model,
-                "temperature": self.agent.temperature,
-                "max_tokens": self.agent.max_tokens
+            **config,
+            "system_prompt": self.agent.system_prompt,
+            "tools": list(self.agent.tools.keys())
             }
         )
 

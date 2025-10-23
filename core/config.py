@@ -16,9 +16,13 @@ class Config:
         self.config["max_tokens"] = self.config.get("max_tokens", 8192)
         
         # Sandbox settings
-        self.config["sandbox_timeout"] = self.config.get("sandbox_timeout", 60)
+        self.config["sandbox_timeout"] = self.config.get("sandbox_timeout", 100)
+
+        # Tool execution settings
+        self.config["tool_call_output_max_length"] = self.config.get("tool_call_output_max_length", 10000)
 
         # Logging settings
+        self.config["log_dir"] = self.config.get("log_dir", "./logs")
         self.config["logging_enabled"] = self.config.get("logging_enabled", True)
         
         # Unified workspace structure
